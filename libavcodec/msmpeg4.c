@@ -28,7 +28,7 @@
  */
 
 #include "avcodec.h"
-#include "dsputil.h"
+#include "idctdsp.h"
 #include "mpegvideo.h"
 #include "msmpeg4.h"
 #include "libavutil/x86/asm.h"
@@ -45,7 +45,6 @@
  *        - (encoding) select best mv table (two choices)
  *        - (encoding) select best vlc/dc table
  */
-//#define DEBUG
 
 /* This table is practically identical to the one from h263
  * except that it is inverted. */
@@ -139,10 +138,10 @@ av_cold void ff_msmpeg4_common_init(MpegEncContext *s)
 
 
     if(s->msmpeg4_version>=4){
-        ff_init_scantable(s->dsp.idct_permutation, &s->intra_scantable  , ff_wmv1_scantable[1]);
-        ff_init_scantable(s->dsp.idct_permutation, &s->intra_h_scantable, ff_wmv1_scantable[2]);
-        ff_init_scantable(s->dsp.idct_permutation, &s->intra_v_scantable, ff_wmv1_scantable[3]);
-        ff_init_scantable(s->dsp.idct_permutation, &s->inter_scantable  , ff_wmv1_scantable[0]);
+        ff_init_scantable(s->idsp.idct_permutation, &s->intra_scantable,   ff_wmv1_scantable[1]);
+        ff_init_scantable(s->idsp.idct_permutation, &s->intra_h_scantable, ff_wmv1_scantable[2]);
+        ff_init_scantable(s->idsp.idct_permutation, &s->intra_v_scantable, ff_wmv1_scantable[3]);
+        ff_init_scantable(s->idsp.idct_permutation, &s->inter_scantable,   ff_wmv1_scantable[0]);
     }
     //Note the default tables are set in common_init in mpegvideo.c
 
@@ -176,13 +175,13 @@ int ff_msmpeg4_coded_block_pred(MpegEncContext * s, int n, uint8_t **coded_block
     return pred;
 }
 
-static int get_dc(uint8_t *src, int stride, int scale)
+static int get_dc(uint8_t *src, int stride, int scale, int block_size)
 {
     int y;
     int sum=0;
-    for(y=0; y<8; y++){
+    for(y=0; y<block_size; y++){
         int x;
-        for(x=0; x<8; x++){
+        for(x=0; x<block_size; x++){
             sum+=src[x + y*stride];
         }
     }
@@ -228,23 +227,20 @@ int ff_msmpeg4_pred_dc(MpegEncContext *s, int n,
         "addl %%eax, %2         \n\t"
         "addl %%eax, %1         \n\t"
         "addl %0, %%eax         \n\t"
-        "mull %4                \n\t"
+        "imull %4               \n\t"
         "movl %%edx, %0         \n\t"
         "movl %1, %%eax         \n\t"
-        "mull %4                \n\t"
+        "imull %4               \n\t"
         "movl %%edx, %1         \n\t"
         "movl %2, %%eax         \n\t"
-        "mull %4                \n\t"
+        "imull %4               \n\t"
         "movl %%edx, %2         \n\t"
         : "+b" (a), "+c" (b), "+D" (c)
         : "g" (scale), "S" (ff_inverse[scale])
         : "%eax", "%edx"
     );
 #else
-    /* #elif ARCH_ALPHA */
-    /* Divisions are extremely costly on Alpha; optimize the most
-       common case. But they are costly everywhere...
-     */
+    /* Divisions are costly everywhere; optimize the most common case. */
     if (scale == 8) {
         a = (a + (8 >> 1)) / 8;
         b = (b + (8 >> 1)) / 8;
@@ -277,17 +273,18 @@ int ff_msmpeg4_pred_dc(MpegEncContext *s, int n,
                     *dir_ptr = 0;
                 }
             }else{
+                int bs = 8 >> s->avctx->lowres;
                 if(n<4){
                     wrap= s->linesize;
-                    dest= s->current_picture.f.data[0] + (((n >> 1) + 2*s->mb_y) * 8*  wrap ) + ((n & 1) + 2*s->mb_x) * 8;
+                    dest= s->current_picture.f->data[0] + (((n >> 1) + 2*s->mb_y) * bs*  wrap ) + ((n & 1) + 2*s->mb_x) * bs;
                 }else{
                     wrap= s->uvlinesize;
-                    dest= s->current_picture.f.data[n - 3] + (s->mb_y * 8 * wrap) + s->mb_x * 8;
+                    dest= s->current_picture.f->data[n - 3] + (s->mb_y * bs * wrap) + s->mb_x * bs;
                 }
                 if(s->mb_x==0) a= (1024 + (scale>>1))/scale;
-                else           a= get_dc(dest-8, wrap, scale*8);
+                else           a= get_dc(dest-bs, wrap, scale*8>>(2*s->avctx->lowres), bs);
                 if(s->mb_y==0) c= (1024 + (scale>>1))/scale;
-                else           c= get_dc(dest-8*wrap, wrap, scale*8);
+                else           c= get_dc(dest-bs*wrap, wrap, scale*8>>(2*s->avctx->lowres), bs);
 
                 if (s->h263_aic_dir==0) {
                     pred= a;

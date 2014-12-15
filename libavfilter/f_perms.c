@@ -41,7 +41,7 @@ typedef struct {
 } PermsContext;
 
 #define OFFSET(x) offsetof(PermsContext, x)
-#define FLAGS AV_OPT_FLAG_FILTERING_PARAM
+#define FLAGS AV_OPT_FLAG_FILTERING_PARAM | AV_OPT_FLAG_AUDIO_PARAM | AV_OPT_FLAG_VIDEO_PARAM
 
 static const AVOption options[] = {
     { "mode", "select permissions mode", OFFSET(mode), AV_OPT_TYPE_INT, {.i64 = MODE_NONE}, MODE_NONE, NB_MODES-1, FLAGS, "mode" },
@@ -54,7 +54,7 @@ static const AVOption options[] = {
     { NULL }
 };
 
-static av_cold int init(AVFilterContext *ctx, const char *args)
+static av_cold int init(AVFilterContext *ctx)
 {
     PermsContext *perms = ctx->priv;
 
@@ -72,7 +72,7 @@ static av_cold int init(AVFilterContext *ctx, const char *args)
 }
 
 enum perm                        {  RO,   RW  };
-static const char *perm_str[2] = { "RO", "RW" };
+static const char * const perm_str[2] = { "RO", "RW" };
 
 static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
 {
@@ -111,8 +111,6 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
     return ret;
 }
 
-static const char *const shorthand[] = { "mode", NULL };
-
 #if CONFIG_APERMS_FILTER
 
 #define aperms_options options
@@ -135,7 +133,7 @@ static const AVFilterPad aperms_outputs[] = {
     { NULL }
 };
 
-AVFilter avfilter_af_aperms = {
+AVFilter ff_af_aperms = {
     .name        = "aperms",
     .description = NULL_IF_CONFIG_SMALL("Set permissions for the output audio frame."),
     .init        = init,
@@ -143,7 +141,6 @@ AVFilter avfilter_af_aperms = {
     .inputs      = aperms_inputs,
     .outputs     = aperms_outputs,
     .priv_class  = &aperms_class,
-    .shorthand   = shorthand,
 };
 #endif /* CONFIG_APERMS_FILTER */
 
@@ -169,7 +166,7 @@ static const AVFilterPad perms_outputs[] = {
     { NULL }
 };
 
-AVFilter avfilter_vf_perms = {
+AVFilter ff_vf_perms = {
     .name        = "perms",
     .description = NULL_IF_CONFIG_SMALL("Set permissions for the output video frame."),
     .init        = init,
@@ -177,6 +174,5 @@ AVFilter avfilter_vf_perms = {
     .inputs      = perms_inputs,
     .outputs     = perms_outputs,
     .priv_class  = &perms_class,
-    .shorthand   = shorthand,
 };
 #endif /* CONFIG_PERMS_FILTER */

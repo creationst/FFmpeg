@@ -46,6 +46,9 @@ int ff_vaapi_render_picture(struct vaapi_context *vactx, VASurfaceID surface)
     VABufferID va_buffers[3];
     unsigned int n_va_buffers = 0;
 
+    if (!vactx->pic_param_buf_id)
+        return 0;
+
     vaUnmapBuffer(vactx->display, vactx->pic_param_buf_id);
     va_buffers[n_va_buffers++] = vactx->pic_param_buf_id;
 
@@ -194,6 +197,9 @@ void ff_vaapi_common_end_frame(AVCodecContext *avctx)
     vactx->slice_params_alloc  = 0;
 }
 
+#if CONFIG_H263_VAAPI_HWACCEL  || CONFIG_MPEG1_VAAPI_HWACCEL || \
+    CONFIG_MPEG2_VAAPI_HWACCEL || CONFIG_MPEG4_VAAPI_HWACCEL || \
+    CONFIG_VC1_VAAPI_HWACCEL   || CONFIG_WMV3_VAAPI_HWACCEL
 int ff_vaapi_mpeg_end_frame(AVCodecContext *avctx)
 {
     struct vaapi_context * const vactx = avctx->hwaccel_context;
@@ -205,7 +211,7 @@ int ff_vaapi_mpeg_end_frame(AVCodecContext *avctx)
         goto finish;
 
     ret = ff_vaapi_render_picture(vactx,
-                                  ff_vaapi_get_surface_id(s->current_picture_ptr));
+                                  ff_vaapi_get_surface_id(s->current_picture_ptr->f));
     if (ret < 0)
         goto finish;
 
@@ -215,5 +221,6 @@ finish:
     ff_vaapi_common_end_frame(avctx);
     return ret;
 }
+#endif
 
 /* @} */

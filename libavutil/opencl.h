@@ -1,7 +1,8 @@
 /*
- * Copyright (C) 2012 Peng Gao <peng@multicorewareinc.com>
- * Copyright (C) 2012 Li   Cao <li@multicorewareinc.com>
- * Copyright (C) 2012 Wei  Gao <weigao@multicorewareinc.com>
+ * Copyright (C) 2012 Peng  Gao     <peng@multicorewareinc.com>
+ * Copyright (C) 2012 Li    Cao     <li@multicorewareinc.com>
+ * Copyright (C) 2012 Wei   Gao     <weigao@multicorewareinc.com>
+ * Copyright (C) 2013 Lenny Wang    <lwanghpc@gmail.com>
  *
  * This file is part of FFmpeg.
  *
@@ -28,32 +29,110 @@
  * change without prior notice.
  */
 
-#ifndef LIBAVUTIL_OPENCLWRAPPER_H
-#define LIBAVUTIL_OPENCLWRAPPER_H
+#ifndef LIBAVUTIL_OPENCL_H
+#define LIBAVUTIL_OPENCL_H
 
-#include <CL/cl.h>
 #include "config.h"
+#if HAVE_CL_CL_H
+#include <CL/cl.h>
+#else
+#include <OpenCL/cl.h>
+#endif
+#include <stdint.h>
 #include "dict.h"
+
+#include "libavutil/version.h"
 
 #define AV_OPENCL_KERNEL( ... )# __VA_ARGS__
 
 #define AV_OPENCL_MAX_KERNEL_NAME_SIZE 150
 
+#define AV_OPENCL_MAX_DEVICE_NAME_SIZE 100
+
+#define AV_OPENCL_MAX_PLATFORM_NAME_SIZE 100
+
 typedef struct {
-    cl_command_queue command_queue;
-    cl_kernel kernel;
-    char kernel_name[AV_OPENCL_MAX_KERNEL_NAME_SIZE];
-} AVOpenCLKernelEnv;
+    int device_type;
+    char device_name[AV_OPENCL_MAX_DEVICE_NAME_SIZE];
+    cl_device_id device_id;
+} AVOpenCLDeviceNode;
+
+typedef struct {
+    cl_platform_id platform_id;
+    char platform_name[AV_OPENCL_MAX_PLATFORM_NAME_SIZE];
+    int device_num;
+    AVOpenCLDeviceNode **device_node;
+} AVOpenCLPlatformNode;
+
+typedef struct {
+    int platform_num;
+    AVOpenCLPlatformNode **platform_node;
+} AVOpenCLDeviceList;
 
 typedef struct {
     cl_platform_id platform_id;
     cl_device_type device_type;
     cl_context context;
-    cl_device_id *device_ids;
     cl_device_id  device_id;
     cl_command_queue command_queue;
     char *platform_name;
 } AVOpenCLExternalEnv;
+
+/**
+ * Get OpenCL device list.
+ *
+ * It must be freed with av_opencl_free_device_list().
+ *
+ * @param device_list pointer to OpenCL environment device list,
+ *                    should be released by av_opencl_free_device_list()
+ *
+ * @return  >=0 on success, a negative error code in case of failure
+ */
+int av_opencl_get_device_list(AVOpenCLDeviceList **device_list);
+
+/**
+  * Free OpenCL device list.
+  *
+  * @param device_list pointer to OpenCL environment device list
+  *                       created by av_opencl_get_device_list()
+  */
+void av_opencl_free_device_list(AVOpenCLDeviceList **device_list);
+
+/**
+ * Set option in the global OpenCL context.
+ *
+ * This options affect the operation performed by the next
+ * av_opencl_init() operation.
+ *
+ * The currently accepted options are:
+ * - platform: set index of platform in device list
+ * - device: set index of device in device list
+ *
+ * See reference "OpenCL Specification Version: 1.2 chapter 5.6.4".
+ *
+ * @param key                 option key
+ * @param val                 option value
+ * @return >=0 on success, a negative error code in case of failure
+ * @see av_opencl_get_option()
+ */
+int av_opencl_set_option(const char *key, const char *val);
+
+/**
+ * Get option value from the global OpenCL context.
+ *
+ * @param key        option key
+ * @param out_val  pointer to location where option value will be
+ *                         written, must be freed with av_freep()
+ * @return  >=0 on success, a negative error code in case of failure
+ * @see av_opencl_set_option()
+ */
+int av_opencl_get_option(const char *key, uint8_t **out_val);
+
+/**
+ * Free option values of the global OpenCL context.
+ *
+ */
+void av_opencl_free_option(void);
 
 /**
  * Allocate OpenCL external environment.
@@ -67,9 +146,18 @@ AVOpenCLExternalEnv *av_opencl_alloc_external_env(void);
 /**
  * Free OpenCL external environment.
  *
- * @param ext_opencl_env pointer to OpenCL external environment created by av_opencl_alloc_external_env()
+ * @param ext_opencl_env pointer to OpenCL external environment
+ *                       created by av_opencl_alloc_external_env()
  */
 void av_opencl_free_external_env(AVOpenCLExternalEnv **ext_opencl_env);
+
+/**
+ * Get OpenCL error string.
+ *
+ * @param status    OpenCL error code
+ * @return OpenCL error string
+ */
+const char *av_opencl_errstr(cl_int status);
 
 /**
  * Register kernel code.
@@ -83,29 +171,30 @@ void av_opencl_free_external_env(AVOpenCLExternalEnv **ext_opencl_env);
 int av_opencl_register_kernel_code(const char *kernel_code);
 
 /**
- * Initialize the run time OpenCL environment and compile the kernel code registered with
- * av_opencl_register_kernel_code().
+ * Initialize the run time OpenCL environment
  *
- * Currently, the only accepted option is "build_options", used to set
- * options to compile registered kernels code. See reference "OpenCL
- * Specification Version: 1.2 chapter 5.6.4".
- *
- * @param options                  dictionary of key/value options
- * @param ext_opencl_env      external OpenCL environment, created by an
- *                                          application program, ignored if set to NULL
- * @return  >=0 on success, a negative error code in case of failure
- */
- int av_opencl_init(AVDictionary *options, AVOpenCLExternalEnv *ext_opencl_env);
-
-/**
- * Create kernel object in the specified kernel environment.
- *
- * @param env                 pointer to kernel environment which is filled with the environment,
- *                                   used to run the kernel
- * @param kernel_name      kernel function name
+ * @param ext_opencl_env external OpenCL environment, created by an
+ *                       application program, ignored if set to NULL
  * @return >=0 on success, a negative error code in case of failure
  */
-int av_opencl_create_kernel(AVOpenCLKernelEnv *env, const char *kernel_name);
+int av_opencl_init(AVOpenCLExternalEnv *ext_opencl_env);
+
+/**
+ * compile specific OpenCL kernel source
+ *
+ * @param program_name  pointer to a program name used for identification
+ * @param build_opts    pointer to a string that describes the preprocessor
+ *                      build options to be used for building the program
+ * @return a cl_program object
+ */
+cl_program av_opencl_compile(const char *program_name, const char* build_opts);
+
+/**
+ * get OpenCL command queue
+ *
+ * @return a cl_command_queue object
+ */
+cl_command_queue av_opencl_get_command_queue(void);
 
 /**
  * Create OpenCL buffer.
@@ -159,11 +248,10 @@ int av_opencl_buffer_read(uint8_t *dst_buf, cl_mem src_cl_buf, size_t buf_size);
  * @return >=0 on success, a negative error code in case of failure
  */
 int av_opencl_buffer_write_image(cl_mem dst_cl_buf, size_t cl_buffer_size, int dst_cl_offset,
-                                        uint8_t **src_data, int *plane_size, int plane_num);
+                                 uint8_t **src_data, int *plane_size, int plane_num);
+
 /**
  * Read image data from OpenCL buffer.
- *
- * src buffer is OpenCL buffer, dst buffer is frame buffer(data[0],data[1]....).
  *
  * @param dst_data           array of pointers to destination plane buffers
  * @param dst_plane_sizes    array of pointers to destination plane buffers
@@ -172,29 +260,39 @@ int av_opencl_buffer_write_image(cl_mem dst_cl_buf, size_t cl_buffer_size, int d
  * @param src_cl_buf_size    size in bytes of OpenCL buffer
  * @return >=0 on success, a negative error code in case of failure
  */
-
 int av_opencl_buffer_read_image(uint8_t **dst_data, int *plane_size, int plane_num,
-                                       cl_mem src_cl_buf, size_t cl_buffer_size);
+                                cl_mem src_cl_buf, size_t cl_buffer_size);
+
 /**
  * Release OpenCL buffer.
  *
- * @param cl_buf  pointer to OpenCL buffer to release, which was previously filled with av_opencl_buffer_create()
+ * @param cl_buf pointer to OpenCL buffer to release, which was
+ *               previously filled with av_opencl_buffer_create()
  */
 void av_opencl_buffer_release(cl_mem *cl_buf);
 
 /**
- *  Release kernel object.
- *
- * @param env  kernel environment where the kernel object was created with av_opencl_create_kernel
- */
-void av_opencl_release_kernel(AVOpenCLKernelEnv *env);
-
-/**
- *  Release OpenCL environment.
+ * Release OpenCL environment.
  *
  * The OpenCL environment is effectively released only if all the created
  * kernels had been released with av_opencl_release_kernel().
  */
 void av_opencl_uninit(void);
 
-#endif/*LIBAVUTIL_OPENCL_H*/
+/**
+ * Benchmark an OpenCL device with a user defined callback function.  This function
+ * sets up an external OpenCL environment including context and command queue on
+ * the device then tears it down in the end.  The callback function should perform
+ * the rest of the work.
+ *
+ * @param device            pointer to the OpenCL device to be used
+ * @param platform          cl_platform_id handle to which the device belongs to
+ * @param benchmark         callback function to perform the benchmark, return a
+ *                          negative value in case of failure
+ * @return the score passed from the callback function, a negative error code in case
+ * of failure
+ */
+int64_t av_opencl_benchmark(AVOpenCLDeviceNode *device, cl_platform_id platform,
+                            int64_t (*benchmark)(AVOpenCLExternalEnv *ext_opencl_env));
+
+#endif /* LIBAVUTIL_OPENCL_H */
